@@ -18,28 +18,25 @@ namespace TerrariaMultiplayer
 			Terraria.WindowsLaunch.Main(new[] { "-steam", "-lobby", "friends", "-config", "serverconfig.txt" });
 		}
 	}
-	public class Signatures
-	{
-		public delegate void UpdateTimeRate();
-		public delegate void GetData(MessageBuffer buffer, int start, int length, out int messageType);
-	}
     public class Hooks
 	{
-public static void Main_UpdateTimeRate(Signatures.UpdateTimeRate next)
-{
-	bool playersAreAsleep = Main.CurrentFrameFlags.SleepingPlayersCount == Main.CurrentFrameFlags.ActivePlayersCount
-							&& Main.CurrentFrameFlags.SleepingPlayersCount > 0;
-	// If players are sleeping at night
-	if (playersAreAsleep && !Main.dayTime && Main.time < 32400.0 && !Main.IsFastForwardingTime())
-	{
-		Main.fastForwardTimeToDawn = true;
-		NetMessage.SendData(7);
-	}
-	next();
-}
+		public delegate void UpdateTimeRate();
+		public static void Main_UpdateTimeRate(UpdateTimeRate next)
+		{
+			bool playersAreAsleep = Main.CurrentFrameFlags.SleepingPlayersCount == Main.CurrentFrameFlags.ActivePlayersCount
+									&& Main.CurrentFrameFlags.SleepingPlayersCount > 0;
+			// If players are sleeping at night
+			if (playersAreAsleep && !Main.dayTime && Main.time < 32400.0 && !Main.IsFastForwardingTime())
+			{
+				Main.fastForwardTimeToDawn = true;
+				NetMessage.SendData(7);
+			}
+			next();
+		}
 
 		// When players tell us they've teleported without max health, nag them.
-		public static void MessageBuffer_GetData(MessageBuffer buffer, int start, int length, out int messageType, Signatures.GetData next)
+		public delegate void GetData(MessageBuffer buffer, int start, int length, out int messageType);
+		public static void MessageBuffer_GetData(MessageBuffer buffer, int start, int length, out int messageType, GetData next)
 		{
 
 			// GetData will write messageType

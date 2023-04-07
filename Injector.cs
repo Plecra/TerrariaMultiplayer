@@ -52,7 +52,6 @@ namespace TerrariaMultiplayer
             def.MainModule.AssemblyReferences.Add(modref);
 
             var hooksref = new TypeReference("TerrariaMultiplayer", "Hooks", def.MainModule, modref);
-            var signaturesref = new TypeReference("TerrariaMultiplayer", "Signatures", def.MainModule, modref);
             foreach (var method in typeof(Hooks).GetMethods())
             {
                 // A silly little parsing scheme I've chosen - hooks are defined as Hooks.TYPE_METHOD
@@ -72,7 +71,7 @@ namespace TerrariaMultiplayer
                     //  of `method.GetParameters()` which risks needing to refer to a type declared elsewhere)
                     new TypeReference("", vanilla_method_name, def.MainModule, modref)
                     {
-                        DeclaringType = signaturesref
+                        DeclaringType = hooksref
                     });
             }
 
