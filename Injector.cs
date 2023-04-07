@@ -54,25 +54,24 @@ namespace TerrariaMultiplayer
             var hooksref = new TypeReference("TerrariaMultiplayer", "Hooks", def.MainModule, modref);
             foreach (var method in typeof(Hooks).GetMethods())
             {
-                // A silly little parsing scheme I've chosen - hooks are defined as Hooks.TYPE_METHOD
+                // A silly little parsing scheme I've chosen - hooks are defined as TerrariaMultiplayer.Hooks.TYPE_METHOD
                 var i = method.Name.IndexOf('_');
                 if (i == -1) continue;
                 var vanilla_method_name = method.Name.Substring(i + 1);
                 var type = def.MainModule.Types.Where(t => t.Name == method.Name.Substring(0, i)).First();
 
                 var vanilla_method = type.Methods.Where(m => m.Name == vanilla_method_name).First();
-                injector.Install(
-                    vanilla_method,
-                    new MethodReference(method.Name, vanilla_method.ReturnType, hooksref),
-
-                    // Unfortunately, we need to manually reference all `Signatures`.
-                    // This is because System.Reflection doesnt allow us to inspect the parameter type
-                    //  without loading the Terraria namespace. (We would need `method.GetParameter(last)`, instead
-                    //  of `method.GetParameters()` which risks needing to refer to a type declared elsewhere)
-                    new TypeReference("", vanilla_method_name, def.MainModule, modref)
-                    {
-                        DeclaringType = hooksref
-                    });
+                var detour_method = new MethodReference(method.Name, vanilla_method.ReturnType, hooksref);
+                foreach (var param in MethodParameters(vanilla_method)) detour_method.Parameters.Add(param);
+                // Unfortunately, we need to manually reference the delegate type.
+                // This is because System.Reflection doesnt allow us to inspect the parameter type
+                //  without loading the Terraria namespace. (We would need `method.GetParameter(last)`, instead
+                //  of `method.GetParameters()` which risks needing to refer to a type declared elsewhere)
+                detour_method.Parameters.Add(new ParameterDefinition(new TypeReference("", vanilla_method_name, def.MainModule, modref)
+                {
+                    DeclaringType = hooksref
+                }));
+                injector.Install(vanilla_method, detour_method);
             }
 
             // Load the rewritten assembly as TerrariaServer
@@ -103,7 +102,23 @@ namespace TerrariaMultiplayer
                 HashAlgorithm = (Mono.Cecil.AssemblyHashAlgorithm)name.HashAlgorithm,
             };
         }
+        public static IEnumerable<ParameterDefinition> MethodParameters(MethodReference method)
+        {
+            var implicit_parameters = method.HasThis ? new[] { method.DeclaringType } : new TypeReference[] { };
+            return implicit_parameters.Concat(method.Parameters.Select(v => v.ParameterType)).Select(t => new ParameterDefinition(t));
+        }
 
+        public static MethodDefinition CloneMethod(string prefix, MethodDefinition method)
+        {
+            var clone = new MethodDefinition(prefix + method.Name, Mono.Cecil.MethodAttributes.Static, method.ReturnType)
+            {
+                DeclaringType = method.DeclaringType,
+                Body = method.Body,
+            };
+            method.DeclaringType.Methods.Add(clone);
+            foreach (var param in MethodParameters(method)) clone.Parameters.Add(param);
+            return clone;
+        }
     }
 
     struct Injector
@@ -111,9 +126,9 @@ namespace TerrariaMultiplayer
         public AssemblyDefinition def;
         public AssemblyNameReference action_scope;
 
-        public void Install(MethodDefinition vanilla_method, MethodReference detour, TypeReference delegate_type)
+        public void Install(MethodDefinition vanilla_method, MethodReference detour)
         {
-            var orig_impl = CloneMethod("orig_", vanilla_method);
+            var orig_impl = Program.CloneMethod("for_" + detour.FullName + "_", vanilla_method);
 
             // Reset the code for the method
             vanilla_method.Body = new Mono.Cecil.Cil.MethodBody(vanilla_method);
@@ -121,17 +136,13 @@ namespace TerrariaMultiplayer
             
             // forward all the method's parameters to the injected detour
             byte arg_idx = 0;
-            foreach (var param in MethodParameters(vanilla_method))
-            {
-                detour.Parameters.Add(param);
+            foreach (var param in Program.MethodParameters(detour))
                 il.Emit(OpCodes.Ldarg_S, arg_idx++);
-            }
 
             // and pass the original implementation as the last argument
-            detour.Parameters.Add(new ParameterDefinition(delegate_type));
             il.Emit(OpCodes.Ldnull);
             il.Emit(OpCodes.Ldftn, orig_impl);
-            il.Emit(OpCodes.Newobj, new MethodReference(".ctor", def.MainModule.TypeSystem.Void, delegate_type)
+            il.Emit(OpCodes.Newobj, new MethodReference(".ctor", def.MainModule.TypeSystem.Void, detour.Parameters.Last().ParameterType)
             {
                 HasThis = true,
                 Parameters =
@@ -145,22 +156,6 @@ namespace TerrariaMultiplayer
             il.Emit(OpCodes.Tail);
             il.Emit(OpCodes.Call, detour);
             il.Emit(OpCodes.Ret);
-        }
-        MethodDefinition CloneMethod(string prefix, MethodDefinition method)
-        {
-            var clone = new MethodDefinition(prefix + method.Name, Mono.Cecil.MethodAttributes.Static, method.ReturnType)
-            {
-                DeclaringType = method.DeclaringType,
-                Body = method.Body,
-            };
-            method.DeclaringType.Methods.Add(clone);
-            foreach (var param in MethodParameters(method)) clone.Parameters.Add(param);
-            return clone;
-        }
-        IEnumerable<ParameterDefinition> MethodParameters(MethodReference method)
-        {
-            var implicit_parameters = method.HasThis ? new[] { method.DeclaringType } : new TypeReference[] { };
-            return implicit_parameters.Concat(method.Parameters.Select(v => v.ParameterType)).Select(t => new ParameterDefinition(t));
         }
     }
 }
