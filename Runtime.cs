@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-
-using Terraria;
+﻿using Terraria;
 using Terraria.Localization;
 using Microsoft.Xna.Framework;
 using System.IO;
@@ -14,8 +9,8 @@ namespace TerrariaMultiplayer
 	{
 		public static void Run(string gamedir)
 		{
-			System.IO.Directory.SetCurrentDirectory(gamedir);
-			Terraria.WindowsLaunch.Main(new[] { "-steam", "-lobby", "friends", "-config", "serverconfig.txt" });
+			Directory.SetCurrentDirectory(gamedir);
+			WindowsLaunch.Main(new[] { "-steam", "-lobby", "friends", "-config", "serverconfig.txt" });
 		}
 	}
     public class Hooks
@@ -38,35 +33,27 @@ namespace TerrariaMultiplayer
 		public delegate void GetData(MessageBuffer buffer, int start, int length, out int messageType);
 		public static void MessageBuffer_GetData(MessageBuffer buffer, int start, int length, out int messageType, GetData next)
 		{
-
-			// GetData will write messageType
-			var reader = new BinaryReader(new MemoryStream(buffer.readBuffer));
-			reader.BaseStream.Position = start;
-			var msg = reader.ReadByte();
-
-			if (msg == 12)
-			{
-				// Client says "I've just respawned"
-				byte whoAmI = reader.ReadByte();
-				Player player14 = Main.player[whoAmI];
-				player14.SpawnX = reader.ReadInt16();
-				player14.SpawnY = reader.ReadInt16();
-				player14.respawnTimer = reader.ReadInt32();
-				player14.numberOfDeathsPVE = reader.ReadInt16();
-				player14.numberOfDeathsPVP = reader.ReadInt16();
-				PlayerSpawnContext playerSpawnContext = (PlayerSpawnContext)reader.ReadByte();
-				if (playerSpawnContext == PlayerSpawnContext.RecallFromItem)
-				{
-					if (player14.statLife != player14.statLifeMax)
+			var buf = buffer.readBuffer;
+			switch (buf[start])
+            {
+				// Spawn
+				case 12:
+					Player player = Main.player[buf[start + 1]];
+					if (PlayerSpawnContext.RecallFromItem == (PlayerSpawnContext)buf[start + 14])
 					{
-						Terraria.Chat.ChatHelper.BroadcastChatMessage(NetworkText.FromFormattable("{0} recalled with {1}hp out of {2}", new[] {
-							player14.name,
-							player14.statLife.ToString(),
-							player14.statLifeMax.ToString()
-						}), Color.Red);
-					}
+						if (player.statLife != player.statLifeMax)
+						{
+							var alert = NetworkText.FromFormattable(
+								"{0} recalled after taking {1} hearts of damage",
+								player.name,
+								(float)(player.statLifeMax - player.statLife) / 20
+							);
+							Terraria.Chat.ChatHelper.BroadcastChatMessage(alert, Color.Red);
+						}
 
-				}
+					}
+					break;
+				default: break;
 			}
 			next(buffer, start, length, out messageType);
 		}
